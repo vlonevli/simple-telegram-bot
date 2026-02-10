@@ -1,48 +1,40 @@
 import os
-import threading
-from flask import Flask
+import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Flask App for Render Health Check
-app = Flask(__name__)
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-@app.route('/')
-def hello():
-    return "Bot is alive! verified"
-
-def run_flask():
-    # Render assigns the port to the PORT environment variable
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
-
-# Bot Logic
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! I am running on Render.")
+    await update.message.reply_text("Hello! I am running on Render with Webhooks!")
 
 if __name__ == '__main__':
-    # Start Flask in a separate thread so Render detects a binded port
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
-    # Get Token
     token = os.environ.get("TELEGRAM_TOKEN")
-    
     if not token:
-        print("ERROR: TELEGRAM_TOKEN environment variable is not set.")
-        print("The web server is running, but the bot will not start without a token.")
-        # We keep the script running so the web server stays alive to report the error
-        flask_thread.join()
+        logging.error("TELEGRAM_TOKEN environment variable is not set.")
+        exit(1)
+
+    application = ApplicationBuilder().token(token).build()
+    
+    start_handler = CommandHandler('start', start)
+    application.add_handler(start_handler)
+
+    # Render specific configuration
+    port = int(os.environ.get("PORT", "8443"))
+    render_external_url = os.environ.get("RENDER_EXTERNAL_URL")
+
+    if render_external_url:
+        logging.info(f"Starting webhook on port {port}, url: {render_external_url}")
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=token,
+            webhook_url=f"{render_external_url}/{token}"
+        )
     else:
-        print("Starting Bot...")
-        # Create the Application
-        application = ApplicationBuilder().token(token).build()
-
-        # Add handlers
-        start_handler = CommandHandler('start', start)
-        application.add_handler(start_handler)
-
-        # Run the bot
-        # This blocks, so it ensures the program keeps running
+        logging.warning("RENDER_EXTERNAL_URL not found. Falling back to polling for local testing.")
         application.run_polling()
